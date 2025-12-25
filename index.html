@@ -139,9 +139,18 @@
         async function startSensor() {
             if (isSimulating) stopSimulation();
 
+            // Check if the browser supports the Generic Sensor API
+            // This is the check that was failing for you
             if (!("ProximitySensor" in window)) {
-                log("ProximitySensor API not supported on this device/browser.", "error");
-                log("Try Chrome on Android or Enable Flags.", "info");
+                log("⚠️ Hardware API Unavailable", "error");
+                log("Reason: This device/browser doesn't support ProximitySensor.", "info");
+                log("Tip: Use Chrome on Android & enable 'generic-sensor-extra-classes' flag.", "info");
+                log("💡 Auto-starting Simulation Mode in 2s...", "success");
+                
+                // UX: Auto-fallback to simulation so it doesn't feel broken
+                setTimeout(() => {
+                    if (!isSimulating) startSimulation();
+                }, 2000);
                 return;
             }
 
@@ -153,7 +162,7 @@
                     if (event.error.name === "NotAllowedError") {
                         log("Permission to access sensor was denied.", "error");
                     } else if (event.error.name === "NotReadableError") {
-                        log("Sensor is not available.", "error");
+                        log("Sensor is not available (hardware issue).", "error");
                     } else {
                         log(`Sensor error: ${event.error.name}`, "error");
                     }
@@ -161,8 +170,6 @@
 
                 sensor.addEventListener("reading", () => {
                     updateUI(sensor.distance, sensor.max, sensor.near);
-                    // Minimal logging to prevent spamming
-                    // log(`Reading: ${sensor.distance}cm`);
                 });
 
                 sensor.start();
@@ -171,6 +178,8 @@
 
             } catch (error) {
                 log(`Init Error: ${error}`, "error");
+                // If it crashes during init, fallback to simulation
+                startSimulation();
             }
         }
 
@@ -185,7 +194,6 @@
             isSimulating = true;
             log("Starting Simulation Mode...", "info");
             
-            let simDistance = 10;
             let simMax = 10;
             
             simInterval = setInterval(() => {
