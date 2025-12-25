@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proximity Sensor Tool</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom pulse animation for the sensor visualizer */
+        @keyframes radar {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 20px rgba(16, 185, 129, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+        @keyframes alert-pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .animate-radar { animation: radar 2s infinite; }
+        .animate-alert { animation: alert-pulse 1s infinite; }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #0f172a; /* Slate 900 */
+            color: #e2e8f0; /* Slate 200 */
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center p-4">
+
+    <!-- Header -->
+    <header class="w-full max-w-md mt-4 mb-8 text-center">
+        <h1 class="text-2xl font-bold text-white mb-2">Proximity Meter</h1>
+        <p class="text-sm text-slate-400">Measures object distance using web sensors.</p>
+    </header>
+
+    <!-- Main Visualizer -->
+    <main class="w-full max-w-md flex flex-col gap-6">
+        
+        <!-- Status Indicator -->
+        <div id="visualizer-container" class="relative w-64 h-64 mx-auto flex items-center justify-center rounded-full border-4 border-slate-700 bg-slate-800 transition-all duration-300">
+            <div id="sensor-status-text" class="text-center z-10">
+                <span class="block text-4xl font-bold mb-1" id="distance-display">--</span>
+                <span class="text-sm text-slate-400 uppercase tracking-widest">CM</span>
+            </div>
+            <!-- Background Alert Circle -->
+            <div id="visualizer-bg" class="absolute inset-0 rounded-full opacity-20 bg-emerald-500"></div>
+        </div>
+
+        <!-- Sensor Data Cards -->
+        <div class="grid grid-cols-2 gap-4">
+            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                <div class="text-xs text-slate-400 uppercase font-semibold mb-1">Max Range</div>
+                <div class="text-xl font-mono text-white" id="max-range">--</div>
+            </div>
+            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                <div class="text-xs text-slate-400 uppercase font-semibold mb-1">Detected</div>
+                <div class="text-xl font-mono text-white" id="is-near">--</div>
+            </div>
+        </div>
+
+        <!-- Controls & Logs -->
+        <div class="flex flex-col gap-3">
+            <button id="start-btn" class="w-full py-4 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-bold rounded-xl shadow-lg transition-colors flex items-center justify-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                Activate Sensor
+            </button>
+            
+            <button id="sim-btn" class="w-full py-3 bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold rounded-xl transition-colors">
+                Test Simulation Mode
+            </button>
+        </div>
+
+        <!-- Console / Status Log -->
+        <div class="bg-black/30 rounded-lg p-3 font-mono text-xs text-green-400 h-32 overflow-y-auto border border-slate-800" id="console-log">
+            <div>> System ready...</div>
+            <div class="text-slate-500">> Note: Requires Android Chrome & HTTPS.</div>
+            <div class="text-slate-500">> Note: iOS not supported.</div>
+        </div>
+
+    </main>
+
+    <script>
+        // UI References
+        const distanceDisplay = document.getElementById('distance-display');
+        const maxRangeDisplay = document.getElementById('max-range');
+        const isNearDisplay = document.getElementById('is-near');
+        const visualizerContainer = document.getElementById('visualizer-container');
+        const visualizerBg = document.getElementById('visualizer-bg');
+        const consoleLog = document.getElementById('console-log');
+        const startBtn = document.getElementById('start-btn');
+        const simBtn = document.getElementById('sim-btn');
+
+        let sensor = null;
+        let isSimulating = false;
+        let simInterval = null;
+
+        // Logger Function
+        function log(msg, type = 'info') {
+            const div = document.createElement('div');
+            div.textContent = `> ${msg}`;
+            if (type === 'error') div.className = 'text-red-400';
+            if (type === 'success') div.className = 'text-emerald-400';
+            consoleLog.prepend(div);
+        }
+
+        // Update UI Function
+        function updateUI(distance, max, near) {
+            // Update Text
+            distanceDisplay.textContent = distance !== null ? distance.toFixed(1) : '--';
+            maxRangeDisplay.textContent = max ? max + ' cm' : '--';
+            isNearDisplay.textContent = near ? 'YES' : 'NO';
+
+            // Visual Logic
+            visualizerContainer.classList.remove('animate-radar', 'animate-alert', 'border-emerald-500', 'border-red-500', 'border-slate-700');
+            visualizerBg.classList.remove('bg-emerald-500', 'bg-red-500');
+
+            if (near) {
+                // Object Detected (Near)
+                visualizerContainer.classList.add('animate-alert', 'border-red-500');
+                visualizerBg.classList.add('bg-red-500');
+                visualizerBg.style.opacity = '0.5';
+                distanceDisplay.classList.add('text-red-400');
+                distanceDisplay.classList.remove('text-white');
+            } else {
+                // Clear (Far)
+                visualizerContainer.classList.add('animate-radar', 'border-emerald-500');
+                visualizerBg.classList.add('bg-emerald-500');
+                visualizerBg.style.opacity = '0.2';
+                distanceDisplay.classList.remove('text-red-400');
+                distanceDisplay.classList.add('text-white');
+            }
+        }
+
+        // Start Hardware Sensor
+        async function startSensor() {
+            if (isSimulating) stopSimulation();
+
+            if (!("ProximitySensor" in window)) {
+                log("ProximitySensor API not supported on this device/browser.", "error");
+                log("Try Chrome on Android or Enable Flags.", "info");
+                return;
+            }
+
+            try {
+                // Create Sensor Instance
+                sensor = new ProximitySensor();
+
+                sensor.addEventListener("error", (event) => {
+                    if (event.error.name === "NotAllowedError") {
+                        log("Permission to access sensor was denied.", "error");
+                    } else if (event.error.name === "NotReadableError") {
+                        log("Sensor is not available.", "error");
+                    } else {
+                        log(`Sensor error: ${event.error.name}`, "error");
+                    }
+                });
+
+                sensor.addEventListener("reading", () => {
+                    updateUI(sensor.distance, sensor.max, sensor.near);
+                    // Minimal logging to prevent spamming
+                    // log(`Reading: ${sensor.distance}cm`);
+                });
+
+                sensor.start();
+                log("Sensor activated!", "success");
+                log("Move your hand near the top of the phone (near ear piece).");
+
+            } catch (error) {
+                log(`Init Error: ${error}`, "error");
+            }
+        }
+
+        // Simulation Mode (For testing on PC/iOS)
+        function startSimulation() {
+            if (sensor) {
+                sensor.stop();
+                sensor = null;
+            }
+            if (isSimulating) return;
+
+            isSimulating = true;
+            log("Starting Simulation Mode...", "info");
+            
+            let simDistance = 10;
+            let simMax = 10;
+            
+            simInterval = setInterval(() => {
+                // Randomly toggle between near (0) and far (10) to simulate binary sensor
+                const isNear = Math.random() > 0.6; 
+                const currentDistance = isNear ? 0 : 10;
+                
+                updateUI(currentDistance, simMax, isNear);
+            }, 2000);
+        }
+
+        function stopSimulation() {
+            isSimulating = false;
+            clearInterval(simInterval);
+            updateUI(null, null, false);
+            log("Simulation stopped.");
+        }
+
+        // Event Listeners
+        startBtn.addEventListener('click', startSensor);
+        simBtn.addEventListener('click', () => {
+            if(isSimulating) {
+                stopSimulation();
+                simBtn.textContent = "Test Simulation Mode";
+                simBtn.classList.remove('bg-red-600', 'hover:bg-red-500');
+                simBtn.classList.add('bg-slate-700', 'hover:bg-slate-600');
+            } else {
+                startSimulation();
+                simBtn.textContent = "Stop Simulation";
+                simBtn.classList.remove('bg-slate-700', 'hover:bg-slate-600');
+                simBtn.classList.add('bg-red-600', 'hover:bg-red-500');
+            }
+        });
+
+    </script>
+</body>
+</html>
